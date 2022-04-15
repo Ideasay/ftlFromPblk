@@ -1,11 +1,30 @@
-# SPDX-License-Identifier: GPL-2.0
 #
-# Makefile for Open-Channel SSDs.
+# A shared Makefile from "https://www.kernel.org/doc/Documentation/kbuild/modules.txt"
+# and optimized by myself
 #
 
-obj-$(CONFIG_NVM)		:= core.o
-obj-$(CONFIG_NVM_PBLK)		+= pblk.o
-pblk-y				:= pblk-init.o pblk-core.o pblk-rb.o \
-				   pblk-write.o pblk-cache.o pblk-read.o \
-				   pblk-gc.o pblk-recovery.o pblk-map.o \
-				   pblk-rl.o pblk-sysfs.o
+modname ?= qblk
+sourcelist ?= qblk-core.o qblk-init.o qblk-rb.o qblk-read.o qblk-rl.o qblk-write.o qblk-map.o qblk-recovery.o qblk-debug.o qblk-gc.o 
+#headerdir ?=
+
+#==========================================================
+ifneq ($(KERNELRELEASE),)
+# kbuild part of makefile
+obj-m  := $(modname).o
+#ccflags-y := -I$(headerdir)
+$(modname)-y := $(sourcelist)
+
+else
+# normal makefile
+KDIR ?= /lib/modules/`uname -r`/build
+
+default:
+	$(MAKE) -C $(KDIR) M=$$PWD
+	rm -rf modules.order .tmp_versions *.mod* *.o.cmd .*.cmd .cache.mk
+clean:
+	rm -rf modules.order Module.symvers .tmp_versions *.ko* *.mod* *.o *.o.cmd .*.cmd .cache.mk
+
+#Module specific targets
+hello:
+	echo "hello"
+endif
