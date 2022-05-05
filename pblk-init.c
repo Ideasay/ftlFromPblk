@@ -24,8 +24,18 @@
 
 static unsigned int write_buffer_size;
 
-module_param(write_buffer_size, uint, 0644);
-MODULE_PARM_DESC(write_buffer_size, "number of entries in a write buffer");
+/*module_param(write_buffer_size, uint, 0644);//could be written if authorized
+MODULE_PARM_DESC(write_buffer_size, "number of entries in a write buffer");*/
+
+//0444: all user could read
+#define __param(type, name, init, msg)		\
+	static type name = init;		\
+	module_param(name, type, 0444);		\
+	MODULE_PARM_DESC(name, msg);
+
+__param(int, rb_size_shift, 0, "The shift of the total ring buffer size.");
+__param(int, pblk_sema_max, 8, "The maximum value of PU semaphores.");
+__param(int, pblk_sema_min, 1, "The minimum value of PU semaphores.");
 
 struct pblk_global_caches {
 	struct kmem_cache	*ws;
@@ -1142,24 +1152,49 @@ static sector_t pblk_capacity(void *private)
 }
 
 static void *pblk_init(struct nvm_tgt_dev *dev, struct gendisk *tdisk,
-		       int flags)
+		       //int flags)
+			   struct nvm_ioctl_create *create)
 {
+	int flags = create->flags;
 	struct nvm_geo *geo = &dev->geo;
 	struct request_queue *bqueue = dev->q;
-	struct request_queue *tqueue = tdisk->queue;
+	//struct request_queue *tqueue = tdisk->queue;
+	struct request_queue *blk_queue;
 	struct pblk *pblk;
+	unsigned int nr_rb;
 	int ret;
 
+	//alloc pblk target
 	pblk = kzalloc(sizeof(struct pblk), GFP_KERNEL);
 	if (!pblk)
 		return ERR_PTR(-ENOMEM);
-
+	//get all available cpus, this func is from cpumask.h(included in pblk.h)
+	
+	nr_rb = pblk->nr_queues = num_possible_cpus();
+	pblk->nr_channels = pblk->activated_channels = geo->nr_chnls;//to be comfirmed
+	pblk->nr_skip = 0;
 	pblk->dev = dev;
-	pblk->disk = tdisk;
-	pblk->state = PBLK_STATE_RUNNING;
-	trace_pblk_state(pblk_disk_name(pblk), pblk->state);
-	pblk->gc.gc_enabled = 0;
+	pblk->sema_max = pblk_sema_max;
+	pblk->sema_min = pblk_sema_min;
+	pblk->disk = tdisk;//purpose is not clear
+	pblk->min_write_pgs = geo->sec_per_pl * (geo->sec_size / PAGE_SIZE);
+	pblk->percpu_dmapool = qblk_allocate_percpu_dma(void *);
+	if (PBLK_DMAPOOL_ISERR(pblk->percpu_dmapool))
+		goto fail_free_pblk;
 
+	if (pblk_init_percpu_dma(pblk))//need to complete
+		goto fail_free_percpu_dma;
+	
+	//pblk_debug_init(pblk); // not a must and to be complete
+	
+	pblk->state = PBLK_STATE_RUNNING;
+	
+	trace_pblk_state(pblk_disk_name(pblk), pblk->state);
+	//pblk->gc.gc_enabled = 0;
+
+	pblk_set_provision(pblk);//to be completed
+	if (flags & NVM_TARGET_FACTORY)
+		pblk_setup_uuid(pblk);//to be completed
 	if (!(geo->version == NVM_OCSSD_SPEC_12 ||
 					geo->version == NVM_OCSSD_SPEC_20)) {
 		pblk_err(pblk, "OCSSD version not supported (%u)\n",
@@ -1174,7 +1209,8 @@ static void *pblk_init(struct nvm_tgt_dev *dev, struct gendisk *tdisk,
 		return ERR_PTR(-EINVAL);
 	}
 
-	spin_lock_init(&pblk->resubmit_lock);
+	
+	spin_lock_init(&pblk->resubmit_lock);//purpose is not clear
 	spin_lock_init(&pblk->trans_lock);
 	spin_lock_init(&pblk->lock);
 
@@ -1201,6 +1237,25 @@ static void *pblk_init(struct nvm_tgt_dev *dev, struct gendisk *tdisk,
 	atomic_long_set(&pblk->write_failed, 0);
 	atomic_long_set(&pblk->erase_failed, 0);
 
+//new add lun init
+	ret = pblk_luns_init(pblk, dev->luns, READ_ONCE(pblk->sema_max));//pblk lun init//to be completed
+	if (ret) {
+		pblk_err("pblk: could not initialize luns\n");
+		goto fail_free_percpu_dma2;
+	}
+/* //to be determined
+qblk->max_write_pgs = nvm_max_phys_sects(dev);
+	if (qblk->min_write_pgs * geo->nr_luns < qblk->max_write_pgs)
+		qblk->max_write_pgs = qblk->min_write_pgs * geo->nr_luns;
+	//pr_notice("%s, qblk->max_write_pgs=%u\n", __func__, qblk->max_write_pgs);//32
+#ifdef QBLK_MIN_DRAIN
+	WARN_ON(1);
+	qblk_set_sec_per_write(qblk, qblk->min_write_pgs);
+	//pr_notice("Drain with min_write_pgs:%d\n", qblk->min_write_pgs);
+#else
+	qblk_set_sec_per_write(qblk, qblk->max_write_pgs);
+	//pr_notice("Drain with max_write_pgs:%d\n", qblk->max_write_pgs);
+#endif*/	
 	ret = pblk_core_init(pblk);
 	if (ret) {
 		pblk_err(pblk, "could not initialize core\n");
@@ -1237,17 +1292,42 @@ static void *pblk_init(struct nvm_tgt_dev *dev, struct gendisk *tdisk,
 		pblk_err(pblk, "could not initialize gc\n");
 		goto fail_stop_writer;
 	}
+	//new add
+	ret = pblk_setup_queues(pblk);//to be completed
+	if (ret)
+		goto fail_free_setup_queues;
+	
+	ret = pblk_rwb_mq_init(pblk, nr_rb);
+	if (ret) {
+		pblk_err(pblk,"pblk: could not initialize multiqueue write buffer\n");
+		goto fail_cleanup_queues;
+	}
+	pblk->tag_set = &qblk->__tag_set;
+	ret = pblk_init_tag_set(pblk, pblk->tag_set);
+	if (ret)
+		goto fail_free_rwbmq;
 
+	blk_queue = pblk->q = blk_mq_init_queue(pblk->tag_set);
+	if (IS_ERR(pblk->q)) {
+		ret = -ENOMEM;
+		goto fail_free_tagset;
+	}
+	//new add end
 	/* inherit the size from the underlying device */
-	blk_queue_logical_block_size(tqueue, queue_physical_block_size(bqueue));
-	blk_queue_max_hw_sectors(tqueue, queue_max_hw_sectors(bqueue));
+	blk_queue_logical_block_size(blk_queue, queue_physical_block_size(bqueue));
+	blk_queue_physical_block_size(blk_queue, queue_physical_block_size(bqueue));
+	blk_queue_max_hw_sectors(blk_queue,
+		min_t(unsigned int, QBLK_MAX_REQ_ADDRS * (geo->sec_size / 512), queue_max_hw_sectors(bqueue)));
+	
+	blk_queue->limits.discard_granularity = geo->sec_per_chk * geo->sec_size;
+	blk_queue->limits.discard_alignment = 0;
+	blk_queue->queuedata = qblk;
 
-	blk_queue_write_cache(tqueue, true, false);
+	blk_queue_write_cache(blk_queue, true, true);
 
-	tqueue->limits.discard_granularity = geo->clba * geo->csecs;
-	tqueue->limits.discard_alignment = 0;
-	blk_queue_max_discard_sectors(tqueue, UINT_MAX >> 9);
-	blk_queue_flag_set(QUEUE_FLAG_DISCARD, tqueue);
+	blk_queue_max_discard_sectors(blk_queue, UINT_MAX >> 9);
+	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, blk_queue);
+	queue_flag_set_unlocked(QUEUE_FLAG_NOMERGES, blk_queue);
 
 	pblk_info(pblk, "luns:%u, lines:%d, secs:%llu, buf entries:%u\n",
 			geo->all_luns, pblk->l_mg.nr_lines,
@@ -1261,6 +1341,13 @@ static void *pblk_init(struct nvm_tgt_dev *dev, struct gendisk *tdisk,
 
 	return pblk;
 
+fail_free_pblk:
+fail_free_percpu_dma:
+fail_free_percpu_dma2:
+fail_free_setup_queues:
+fail_free_rwbmq:
+fail_cleanup_queues:
+fail_free_tagset:
 fail_stop_writer:
 	pblk_writer_stop(pblk);
 fail_free_l2p:

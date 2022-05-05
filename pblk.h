@@ -31,6 +31,14 @@
 #include <linux/uuid.h>
 
 #include <linux/lightnvm.h>
+//new add
+#include <linux/cpumask.h>
+#include <linux/delay.h>
+#include <linux/proc_fs.h>
+#include <linux/dma-mapping.h>
+
+//new add
+#define PBLK_PERCPU_DMA_ALLOC
 
 /* Run only GC if less than 1/X blocks are free */
 #define GC_LIMIT_INVERSE 5
@@ -590,9 +598,21 @@ struct pblk_addrf {
 };
 
 struct pblk {
+	//new add for multi-queue feature
+	struct blk_mq_tag_set *tag_set;
+	struct blk_mq_tag_set __tag_set;
+	struct request_queue *q;
+	//struct qblk_queue __percpu *queues;
+	unsigned int nr_queues;//usable queues<->available cpu
+	unsigned int nr_channels;//usable queues<-> hw geometry
+	unsigned int activated_channels;//activated channels from nr_channels
+	unsigned int nr_skip;//the purpose is not clear;
+	unsigned int sema_max;//the max value of pu semaphores
+	unsigned int sema_min;//the min value of pu semaphores
+	void __percpu **percpu_dmapool;
+	//new add end
 	struct nvm_tgt_dev *dev;
 	struct gendisk *disk;
-
 	struct kobject kobj;
 
 	struct pblk_lun *luns;
@@ -761,6 +781,17 @@ ssize_t pblk_rb_sysfs(struct pblk_rb *rb, char *buf);
 /*
  * pblk core
  */
+#ifdef PBLK_PERCPU_DMA_ALLOC
+#define pblk_allocate_percpu_dma(type) alloc_percpu(type)
+#define PBLK_DMAPOOL_ISERR(pool) (!pool)
+#else
+#define pblk_allocate_percpu_dma(type) NULL
+#define PBLK_DMAPOOL_ISERR(pool) (0)
+#endif
+
+//new add function
+int pblk_init_percpu_dma(struct qblk *qblk);
+
 struct nvm_rq *pblk_alloc_rqd(struct pblk *pblk, int type);
 void pblk_free_rqd(struct pblk *pblk, struct nvm_rq *rqd, int type);
 int pblk_alloc_rqd_meta(struct pblk *pblk, struct nvm_rq *rqd);
