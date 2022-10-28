@@ -280,6 +280,151 @@ void handle_nvme_io_vector_reset(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_
     cq_entry->dw[1] = (u32)(cs>>32);
 }
 
+void handle_nvme_io_copy(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_entry)
+{
+    //new line
+    //controll
+    u16 status=0;
+    nvme_sq_copy_dw12_t* sq_entry_dw12;
+    sq_entry_dw12 = (nvme_sq_read_dw12_t*)(&sq_entry->dw[12]);
+    //sq_entry_dw12->DescriptorFormart
+    u8 nr = (sq_entry_dw12->NR) + 1;
+
+    //destination of copy
+    u64 SDLBA;
+    SDLBA = (((u64)(sq_entry->dw[11]))<<32) + (u64)(sq_entry->dw[10]);
+    u32 lba_dest = (u32)SDLBA;
+    OC_PHYSICAL_ADDRESS physical_address_dest = (OC_PHYSICAL_ADDRESS)lba_dest;
+    u32 group_addr_dest = physical_address_dest.group_addr;
+    u32 chunk_addr_dest = physical_address_dest.chunk_addr;
+    u32 logical_block_addr_dest = physical_address_dest.logical_block_addr;
+    u32 rowAddress_dest = (chunk_addr_dest<<7) + logical_block_addr_dest;
+    u32 baseAddr_dest = group_addr_dest?NSC_1_BASEADDR:NSC_0_BASEADDR;
+
+    //src of copy
+    //source range descriptor fetch
+    u64 dptr = sq_entry->dptr;
+    u32 range_des_lenth;
+    if (sq_entry_dw12->DescriptorFormart == 0)
+    {
+        range_des_lenth = nr*32;//unit is byte
+    }
+    else//sq_entry_dw12->DescriptorFormart == 1
+    {
+        range_des_lenth = nr*40;//unit is byte
+    }
+    write_ioP_h2c_dsc(dptr,COPY_RANGE_DESCRIPTOR,range_des_lenth);
+    while((get_io_dma_status() & 0x2) == 0);
+
+    copy_descriptor_format_0h_t* range_descriptor_0h;
+    copy_descriptor_format_1h_t* range_descriptor_1h;
+    OC_PHYSICAL_ADDRESS physical_address;
+    u64 SLBA;
+    u32 lba;
+    u32 group_addr;
+    u32 chunk_addr;
+    u32 logical_block_addr;
+    u32 rowAddr;
+    u16 nlb;
+    u32 descriptorBaseAddr;
+    u32 baseAddr;
+    int i,j;
+    if (sq_entry_dw12->DescriptorFormart == 0)
+    {
+        //range_descriptor_0h = (void*)COPY_RANGE_DESCRIPTOR;
+        for ( i = 0; i < nr; i++)
+        {
+            descriptorBaseAddr = COPY_RANGE_DESCRIPTOR + i*32;
+            IO_PRINT("descriptorBaseAddr is 0x%x \n\r",descriptorBaseAddr);
+            range_descriptor_0h = (void*)descriptorBaseAddr;
+            SLBA = range_descriptor_0h->SLBA;
+            lba = (u32)SLBA;
+            ASSERT();
+            physical_address = (OC_PHYSICAL_ADDRESS)lba;
+            group_addr = physical_address.group_addr;
+            chunk_addr = physical_address.chunk_addr;
+            logical_block_addr = physical_address.logical_block_addr;
+            rowAddress = (chunk_addr<<7) + logical_block_addr;
+            baseAddr = group_addr?NSC_1_BASEADDR:NSC_0_BASEADDR;
+            nlb = range_descriptor_0h->NLB + 1;
+            for ( j = 0; j < nlb; j++)
+            {
+                ASSERT((rowAddress>>LB_ADDR_LENGTH) == chunk_addr);
+                ASSERT((rowAddress_dest>>LB_ADDR_LENGTH) == chunk_addr_dest);
+                if(CheckMetaData(lba,IO_NVM_READ,cq_entry) == 0)
+                {
+                    readpage_00h_30h(baseAddr, 1/*way*/ , 0/*col*/, rowAddress, BYTES_PER_DATA_REGION_OF_PAGE, PL_IO_COPY_BUF_BASEADDR);
+                    if(CheckMetaData(lba_dest,IO_NVM_READ,cq_entry) == 2)
+                        goto forbidden_write;
+                    progpage_80h_10h(baseAddr_dest, 1, 0, rowAddress_dest, BYTES_PER_DATA_REGION_OF_PAGE, PL_IO_COPY_BUF_BASEADDR);
+                    MaintainMetaData(lba_dest,IO_NVM_WRITE);
+                }
+                else
+                {
+                    IO_PRINT("read useless data program predefine data\n\r");
+                    if(CheckMetaData(lba_dest,IO_NVM_READ,cq_entry) == 2)
+                        goto forbidden_write;
+                    progpage_80h_10h(baseAddr_dest, 1, 0, rowAddress_dest, BYTES_PER_DATA_REGION_OF_PAGE, PREDEFINED_DATA_ADDR);
+                    MaintainMetaData(lba_dest,IO_NVM_WRITE);
+                }
+                rowAddress++;
+                rowAddress_dest++;
+            }      
+        }   
+    }
+    else//sq_entry_dw12->DescriptorFormart == 1
+    {
+        //range_descriptor_1h = (void*)COPY_RANGE_DESCRIPTOR;
+        for ( i = 0; i < nr; i++)
+        {
+            descriptorBaseAddr = COPY_RANGE_DESCRIPTOR + i*40;
+            IO_PRINT("descriptorBaseAddr is 0x%x \n\r",descriptorBaseAddr);
+            range_descriptor_1h = (void*)descriptorBaseAddr;
+            SLBA = range_descriptor_1h->SLBA;
+            lba = (u32)SLBA;
+            physical_address = (OC_PHYSICAL_ADDRESS)lba;
+            group_addr = physical_address.group_addr;
+            chunk_addr = physical_address.chunk_addr;
+            logical_block_addr = physical_address.logical_block_addr;
+            rowAddress = (chunk_addr<<7) + logical_block_addr;
+            baseAddr = group_addr?NSC_1_BASEADDR:NSC_0_BASEADDR;
+            nlb = range_descriptor_1h->NLB + 1;
+            for ( j = 0; j < nlb; j++)
+            {
+                ASSERT((rowAddress>>LB_ADDR_LENGTH) == chunk_addr);
+                ASSERT((rowAddress_dest>>LB_ADDR_LENGTH) == chunk_addr_dest);
+                if(CheckMetaData(lba,IO_NVM_READ,cq_entry) == 0)
+                {
+                    readpage_00h_30h(baseAddr, 1/*way*/ , 0/*col*/, rowAddress, BYTES_PER_DATA_REGION_OF_PAGE, PL_IO_COPY_BUF_BASEADDR);
+                    if(CheckMetaData(lba_dest,IO_NVM_READ,cq_entry) == 2)
+                        goto forbidden_write;
+                    progpage_80h_10h(baseAddr_dest, 1, 0, rowAddress_dest, BYTES_PER_DATA_REGION_OF_PAGE, PL_IO_COPY_BUF_BASEADDR);
+                    MaintainMetaData(lba_dest,IO_NVM_WRITE);
+                }
+                else
+                {
+                    IO_PRINT("read useless data program predefine data\n\r");
+                    if(CheckMetaData(lba_dest,IO_NVM_READ,cq_entry) == 2)
+                        goto forbidden_write;
+                    progpage_80h_10h(baseAddr_dest, 1, 0, rowAddress_dest, BYTES_PER_DATA_REGION_OF_PAGE, PREDEFINED_DATA_ADDR);
+                    MaintainMetaData(lba_dest,IO_NVM_WRITE);
+                }
+                rowAddress++;
+                rowAddress_dest++;
+            }   
+        }   
+    }
+    //cq status
+
+    //cq_entry->dw[0] = (u32)cs;
+    //cq_entry->dw[1] = (u32)(cs>>32);
+forbidden_write:
+    IO_PRINT("forbidden_write!\n\r");
+    //assert(0);
+    return;
+    
+}
+
 int process_io_cmd(nvme_sq_entry_t* sq_entry, nvme_cq_entry_t* cq_entry)
 {
 
@@ -336,6 +481,12 @@ int process_io_cmd(nvme_sq_entry_t* sq_entry, nvme_cq_entry_t* cq_entry)
         {
             IO_PRINT(" OC Vector Reset\r\n");
             handle_nvme_io_vector_reset(sq_entry, cq_entry);
+            break;
+        }
+        case IO_NVM_COPY://NVME 2.0 copy cmd
+        {
+            IO_PRINT("NVME 2.0 copy\r\n");
+            handle_nvme_io_copy(sq_entry,cq_entry);
             break;
         }
         default:

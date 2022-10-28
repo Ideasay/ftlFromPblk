@@ -38,9 +38,9 @@ void handle_nvme_io_vector_read(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_e
 
 void handle_nvme_io_vector_write(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_entry);
 
+void handle_nvme_io_copy(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_entry);
+
 void handle_nvme_io_vector_reset(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_entry);
-
-
 void handle_nvme_io_reset(nvme_sq_entry_t *sq_entry, nvme_cq_entry_t *cq_entry);
 void MapPRPsToBlock(unsigned int loop,u32 startLba/*block*/, int start_offset/*prp*/, unsigned int cmdCode, nvme_cq_entry_t *cq_entry, u64 *prpCollectedForSlice, int *dataLengthForSlice);
 void ReqTransNvmeToSlice(u32 startLba, unsigned int nlb, unsigned int cmdCode, u64 prp1ForReq, u64 prp2ForReq, int prpNum, int start_offset, int data_length, nvme_cq_entry_t *cq_entry);

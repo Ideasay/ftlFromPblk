@@ -142,6 +142,117 @@ typedef union _nvme_cq_entry_t
 	};
 } nvme_cq_entry_t;
 
+/*nvme 2.0 copy related struct begin*/
+typedef union _nvme_sq_copy_dw2_dw3_t
+{
+	u64 dw;
+	struct
+	{
+		u64	LBST		:48;
+		u64 reserved	:16;
+	};
+}nvme_sq_copy_dw2_dw3_t;
+
+typedef union _nvme_sq_copy_dw10_dw11_t
+{
+	u32 dw[2];
+	struct 
+	{
+		u32 SDLBA_L;
+		u32 SDLBA_H;
+	};	
+}nvme_sq_copy_dw10_dw11_t;
+
+typedef union _nvme_sq_copy_dw12_t
+{
+	u32 dw;
+	struct 
+	{
+		u32 NR					:8;//number of ranges
+		u32 DescriptorFormart	:4;
+		u32 PRINFOR 			:4;
+		u32	reserved1 			:4;
+		u32 DTYPE				:4;
+		u32 STCW 				:1;
+		u32 reserved2			:1;
+		u32 PRINFOW 			:4;
+		u32 FUA 				:1;
+		u32 LR					:1;
+	};	
+}nvme_sq_copy_dw12_t;
+
+typedef union _nvme_sq_copy_dw13_t
+{
+	u32 dw;
+	struct 
+	{
+		u32 reserved	:16;
+		u32 DSPEC		:16;
+	};	
+}nvme_sq_copy_dw13_t;
+
+typedef union _nvme_sq_copy_dw14_t
+{
+	u32 dw;
+	u32 LBST_dw14;
+}nvme_sq_copy_dw14_t;
+
+typedef union _nvme_sq_copy_dw15_t
+{
+	u64;
+	struct 
+	{
+		u64 LBAT	:16;
+		u64 LBATM 	:16;
+	};	
+}nvme_sq_copy_dw15_t;
+
+typedef union _copy_descriptor_format_0h_t
+{
+	u8 bytes[32];
+	struct 
+	{
+		u64 reserved;
+		u64 SLBA;
+		union 
+		{
+			u32 dw;
+			struct 
+			{
+				u32 NLB 		:16;
+				u32 reserved1	:16;
+			};	
+		};
+		u32 reserved2;
+		u32 ELBST_FIELD;
+		u16 ELBAT;
+		u16 ELBATM;	
+	};	
+}copy_descriptor_format_0h_t;
+
+typedef union _copy_descriptor_format_1h_t
+{
+	u8 bytes[40];
+	struct 
+	{
+		u64 reserved;
+		u64 SLBA;
+		union 
+		{
+			u32 dw;
+			struct 
+			{
+				u32 NLB 		:16;
+				u32 reserved1	:16;
+			};	
+		};
+		u8 reserved2[6];
+		u8 ELBST_FIELD[10];
+		u16 ELBAT;
+		u16 ELBATM;	
+	};	
+}copy_descriptor_format_1h_t;
+/*nvme 2.0 copy related struct begin*/
 typedef union _nvme_sq_create_io_cq_dw10_t
 {
 	u32	dw;
@@ -882,7 +993,8 @@ typedef union _nvme_identify_controller_data_t
 				u16	reservation					:1;
 				u16	timestamp					:1;
 				u16 verify						:1;
-				u16	oncs_reserved0				:8;
+				u16	copy 						:1;
+				u16	oncs_reserved0				:7;
 			};
 		};
 
@@ -1231,6 +1343,7 @@ typedef enum _NVME_ADMIN_OPCODE_E
 #define IO_NVM_PPA_VECTOR_CHUNK_WRITE			0x91
 #define IO_NVM_PPA_VECTOR_CHUNK_READ			0x92
 #define IO_NVM_PPA_VECTOR_CHUNK_COPY			0x93
+#define IO_NVM_COPY								0x19
 
 // Opcodes for NVM Commands
 typedef enum _NVME_NVM_OPCODE_E
@@ -1249,6 +1362,7 @@ typedef enum _NVME_NVM_OPCODE_E
 	NVME_NVM_OPCODE_RESERVATION_REPORT				= 0x0E,
 	NVME_NVM_OPCODE_RESERVATION_ACQUIRE				= 0x11,
 	NVME_NVM_OPCODE_RESERVATION_RELEASE				= 0x15,
+	NVME_NVM_OPCODE_COPY							= 0x19,
 
 	OC_NVM_PPA_OPCODE_VECTOR_CHUNK_RESET			= 0x90, //optional
 	OC_NVM_PPA_OPCODE_VECTOR_CHUNK_WRITE			= 0x91, //optional
@@ -1385,6 +1499,7 @@ typedef enum _NVME_SC_SPECIFIC_E
 	NVME_SC_SPECIFIC_CONFLICT_ATTRIBUTE				= 0x80,
 	NVME_SC_SPECIFIC_INVALID_PROTECT_INFOMATION		= 0x81,
 	NVME_SC_SPECIFIC_WRITE_TO_READ_ONLY_RANGE		= 0x82,
+	NVME_SC_SPECIFIC_CMD_SIZE_LIMIT_SIZE_EXCEEDED	= 0x83,
 } NVME_SC_SPECIFIC_E;
 
 
@@ -1458,9 +1573,9 @@ typedef union _nvme_sq_dataset_management_dw11_t
 	{
 		//Integral Dataset for Read (IDR)
 		u32	idr:1;
-		//Attribute ¨C Integral Dataset for Write (IDW)
+		//Attribute ï¿½C Integral Dataset for Write (IDW)
 		u32	idw:1;
-		//Attribute ¨C Deallocate (AD)
+		//Attribute ï¿½C Deallocate (AD)
 		u32	ad:1;
 		u32	reserve:29;
 	};

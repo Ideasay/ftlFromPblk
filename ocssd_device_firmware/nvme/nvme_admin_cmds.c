@@ -656,6 +656,7 @@ void identify_controller_data(u32* buf)
 	controller_data->reservation = 0;
 	controller_data->timestamp = 0;
 	controller_data->verify = 0;
+	controller_data->copy = 1;
 
 	// FUSES
 	controller_data->compare_and_write_fused = 0;

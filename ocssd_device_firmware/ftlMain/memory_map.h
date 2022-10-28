@@ -17,7 +17,8 @@
 #define DSMPRP_DATA_ADDR                PREDEFINED_DATA_ADDR + 0x2000   	//size=0x2000
 #define LBA_LIST_ADDR                   DSMPRP_DATA_ADDR + 0x2000       	//size=0x1000
 #define VECTOR_RESET_CHUNK_DES_ADDR		LBA_LIST_ADDR + 0x1000				//size=0x1000
-#define CHUNK_LOG_NOTIFICATION_ENTRY	VECTOR_RESET_CHUNK_DES_ADDR + 0x1000//size=0x1000
+#define COPY_RANGE_DESCRIPTOR           VECTOR_RESET_CHUNK_DES_ADDR + 0x1000//size = 4KB
+#define CHUNK_LOG_NOTIFICATION_ENTRY	COPY_RANGE_DESCRIPTOR + 0x1000//size=0x1000
 #define PL_AD_PRP_BUF_BASEADDR	        CHUNK_LOG_NOTIFICATION_ENTRY + 0x1000
 /**************************************************************
  ******************* ourNVMe Segment begin *******************
@@ -54,7 +55,8 @@
 #define PL_IO_READ_BUF_BASEADDR			(PL_CQ_DATA_BUF_BASEADDR+0x2000)
 #define PL_IO_WRITE_BUF_BASEADDR	    (PL_IO_READ_BUF_BASEADDR+0x2000)
 #define PL_IO_PRP_BUF_BASEADDR	        (PL_IO_WRITE_BUF_BASEADDR+0x4000)
-#define PL_IO_END                       (PL_IO_PRP_BUF_BASEADDR+0x2000)
+#define PL_IO_COPY_BUF_BASEADDR         (PL_IO_PRP_BUF_BASEADDR+0x2000)
+#define PL_IO_END                       (PL_IO_COPY_BUF_BASEADDR+0x2000)
 /**************************************************************
  ******************* ourNVMe Segement end *********************
  **************************************************************/
